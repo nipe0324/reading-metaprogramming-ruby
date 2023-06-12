@@ -5,7 +5,19 @@ TryOver3 = Module.new
 # - `test_` から始まるインスタンスメソッドが実行された場合、このクラスは `run_test` メソッドを実行する
 # - `test_` メソッドがこのクラスに実装されていなくても `test_` から始まるメッセージに応答することができる
 # - TryOver3::A1 には `test_` から始まるインスタンスメソッドが定義されていない
+class TryOver3::A1
+  def run_test
+    nil
+  end
 
+  def method_missing(name, *args)
+    if name.to_s.start_with?("test_")
+      run_test
+    else
+      super
+    end
+  end
+end
 
 # Q2
 # 以下要件を満たす TryOver3::A2Proxy クラスを作成してください。
@@ -15,6 +27,24 @@ class TryOver3::A2
   def initialize(name, value)
     instance_variable_set("@#{name}", value)
     self.class.attr_accessor name.to_sym unless respond_to? name.to_sym
+  end
+end
+
+class TryOver3::A2Proxy
+  def initialize(source)
+    @source = source
+  end
+
+  def method_missing(name, *args)
+    if @source.respond_to?(name)
+      @source.public_send(name, *args)
+    else
+      super
+    end
+  end
+
+  def respond_to?(name, include_private = false)
+    @source.respond_to?(name, include_private)
   end
 end
 
@@ -37,6 +67,8 @@ module TryOver3::OriginalAccessor2
           self.class.define_method "#{name}?" do
             @attr == true
           end
+        elsif respond_to?("#{name}?")
+          self.class.remove_method "#{name}?"
         end
         @attr = value
       end
@@ -51,7 +83,21 @@ end
 # TryOver3::A4::Hoge.run
 # # => "run Hoge"
 # このとき、TryOver3::A4::Hogeという定数は定義されません。
+class TryOver3::A4
+  def self.runners=(consts)
+    @consts = consts
+  end
 
+  def self.const_missing(const)
+    if @consts.include?(const)
+      obj = Object.new
+      obj.define_singleton_method(:run) { "run #{const}" }
+      obj
+    else
+      super
+    end
+  end
+end
 
 # Q5. チャレンジ問題！ 挑戦する方はテストの skip を外して挑戦してみてください。
 #
@@ -59,16 +105,23 @@ end
 module TryOver3::TaskHelper
   def self.included(klass)
     klass.define_singleton_method :task do |name, &task_block|
-      new_klass = Class.new do
-        define_singleton_method :run do
-          puts "start #{Time.now}"
-          block_return = task_block.call
-          puts "finish #{Time.now}"
-          block_return
-        end
+      define_singleton_method name do
+        puts "start #{Time.now}"
+        block_return = task_block.call
+        puts "finish #{Time.now}"
+        block_return
       end
-      new_klass_name = name.to_s.split("_").map{ |w| w[0] = w[0].upcase; w }.join
-      const_set(new_klass_name, new_klass)
+
+      define_singleton_method(:const_missing) do |const|
+        super(const) unless klass.respond_to?(const.downcase)
+
+        obj = Object.new
+        obj.define_singleton_method :run do
+          warn "Warning: TryOver3::A5Task::#{const}.run is deprecated"
+          klass.send name
+        end
+        obj
+      end
     end
   end
 end
